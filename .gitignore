@@ -1,0 +1,57 @@
+# Build / packaging output (PyInstaller) -- *.spec은 build.ps1이 실행할 때마다
+# 개인 PC의 절대경로를 담아 새로 만들어내므로 커밋 대상이 아니다.
+build/
+dist/
+*.spec
+*.spec.bak
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.Python
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+!.env.example
+secrets.json
+credentials.json
+*.pem
+*.key
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Large local data / models / outputs (fetch or generate separately)
+data/
+!data/.gitkeep
+
+# Local run artifacts
+*.tmp
+*.bak
+
+# 실행 중 생성되는 사용자 업로드/작업 결과물(webapp/app.py의 JOBS_DIR) --
+# 실제 사용자가 올린 3D 스캔 파일이 들어갈 수 있어 절대 커밋하지 않는다.
+webapp/jobs/
