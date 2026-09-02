@@ -6,14 +6,17 @@
 <title>발 추출 마법사</title>
 <style>
   :root {
-    --bg: #101211;
-    --panel: #171a19;
-    --border: #2b302e;
-    --ink: #ecf1ef;
-    --ink-muted: #8fa39c;
-    --accent: #529aac;
-    --accent-dim: #1c3a30;
-    --danger: #e2685a;
+    --bg: #eef2f7;
+    --panel: #ffffff;
+    --border: #dbe2eb;
+    --ink: #0f172a;
+    --ink-muted: #5b6675;
+    --accent: #2563eb;
+    --accent-hover: #1d4ed8;
+    --accent-dim: #e3ecfd;
+    --danger: #dc2626;
+    --stage-bg: #0f1b30;
+    --shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 8px 24px rgba(15, 23, 42, .06);
   }
   * { box-sizing: border-box; }
   body {
@@ -28,21 +31,22 @@
   }
   .steps { display: flex; gap: 28px; }
   .step-dot {
-    display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-muted);
+    display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--ink-muted);
   }
   .step-dot .n {
     width: 26px; height: 26px; border-radius: 50%; border: 1.5px solid var(--border);
-    display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px;
+    background: var(--panel);
+    display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px;
   }
   .step-dot.active { color: var(--ink); }
   .step-dot.active .n { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
-  .step-dot.done .n { border-color: var(--accent); background: var(--accent); color: #06120d; }
+  .step-dot.done .n { border-color: var(--accent); background: var(--accent); color: #fff; }
 
   main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 24px; }
   .panel {
     width: min(760px, 94vw); background: var(--panel); border: 1px solid var(--border);
     border-radius: 16px; padding: 40px; display: flex; flex-direction: column; align-items: center;
-    gap: 20px; text-align: center;
+    gap: 20px; text-align: center; box-shadow: var(--shadow);
   }
   .panel[hidden] { display: none; }
   .panel h1 { font-size: 22px; margin: 0; }
@@ -51,29 +55,32 @@
   /* 1: 업로드 */
   .dropzone {
     width: 100%; min-height: 220px; border: 2px dashed var(--border); border-radius: 12px;
+    background: var(--bg);
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
     cursor: pointer; transition: border-color .15s, background .15s;
   }
+  .dropzone:hover { border-color: var(--accent); }
   .dropzone.drag { border-color: var(--accent); background: var(--accent-dim); }
-  .dropzone .icon { font-size: 40px; opacity: .6; }
-  .dropzone .fname { color: var(--accent); font-size: 14px; }
+  .dropzone .icon { font-size: 40px; opacity: .7; }
+  .dropzone .fname { color: var(--accent); font-weight: 600; font-size: 14px; }
 
   /* 2: 방향 후보 캐러셀 */
   .carousel { display: flex; align-items: center; gap: 18px; width: 100%; justify-content: center; }
   .carousel button.arrow {
     width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--border);
     background: var(--panel); color: var(--ink); font-size: 18px; cursor: pointer; flex-shrink: 0;
+    transition: border-color .15s, color .15s;
   }
-  .carousel button.arrow:disabled { opacity: .3; cursor: not-allowed; }
+  .carousel button.arrow:disabled { opacity: .35; cursor: not-allowed; }
   .carousel button.arrow:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
   .cand-frame {
-    width: 340px; height: 340px; border-radius: 12px; overflow: hidden; background: #000;
+    width: 340px; height: 340px; border-radius: 12px; overflow: hidden; background: var(--stage-bg);
     border: 1px solid var(--border); position: relative;
   }
   .cand-frame img { width: 100%; height: 100%; object-fit: contain; }
   .cand-score {
-    position: absolute; bottom: 8px; right: 10px; font-size: 12px; color: var(--ink-muted);
-    background: rgba(0,0,0,.5); padding: 2px 8px; border-radius: 10px;
+    position: absolute; bottom: 8px; right: 10px; font-size: 12px; color: #fff;
+    background: rgba(15,23,42,.65); padding: 2px 8px; border-radius: 10px;
   }
   .dots { display: flex; gap: 7px; }
   .dots .d { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
@@ -81,7 +88,7 @@
 
   /* 3: 절단 */
   #cutViewport {
-    width: 100%; height: 420px; border-radius: 12px; overflow: hidden; background: #05100c;
+    width: 100%; height: 420px; border-radius: 12px; overflow: hidden; background: var(--stage-bg);
     border: 1px solid var(--border);
   }
   .cut-controls { width: 100%; display: flex; flex-direction: column; gap: 8px; }
@@ -93,33 +100,36 @@
   .tilt-adv label { font-size: 12px; color: var(--ink-muted); display: block; margin-top: 8px; }
 
   /* 4: 완료 */
-  model-viewer { width: 100%; height: 340px; background: #000; border-radius: 12px; }
+  model-viewer { width: 100%; height: 340px; background: var(--stage-bg); border-radius: 12px; }
 
   .actions { display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap; justify-content: center; }
   button.primary {
-    background: var(--accent); color: #06120d; border: none; padding: 12px 26px;
-    border-radius: 9px; font-size: 15px; font-weight: 700; cursor: pointer;
+    background: var(--accent); color: #fff; border: none; padding: 12px 26px;
+    border-radius: 9px; font-size: 15px; font-weight: 700; cursor: pointer; transition: background .15s;
   }
-  button.primary:disabled { background: #294238; color: #5c6d65; cursor: not-allowed; }
+  button.primary:not(:disabled):hover { background: var(--accent-hover); }
+  button.primary:disabled { background: #cbd5e1; color: #f1f5f9; cursor: not-allowed; }
   button.secondary {
-    background: transparent; color: var(--ink-muted); border: 1px solid var(--border);
-    padding: 12px 20px; border-radius: 9px; font-size: 14px; cursor: pointer;
+    background: var(--panel); color: var(--ink-muted); border: 1px solid var(--border);
+    padding: 12px 20px; border-radius: 9px; font-size: 14px; cursor: pointer; transition: color .15s, border-color .15s;
   }
   button.secondary:hover { color: var(--ink); border-color: var(--ink-muted); }
   a.dl-link {
-    color: var(--accent); font-size: 14px; text-decoration: none; border-bottom: 1px solid var(--accent);
+    color: var(--accent); font-weight: 600; font-size: 14px; text-decoration: none;
+    border-bottom: 1px solid var(--accent);
   }
+  a.dl-link:hover { color: var(--accent-hover); border-color: var(--accent-hover); }
   .status { font-size: 13px; color: var(--ink-muted); min-height: 18px; }
-  .status.err { color: var(--danger); white-space: pre-wrap; text-align: left; max-height: 140px; overflow: auto; }
+  .status.err {
+    color: var(--danger); background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px;
+    padding: 8px 12px; white-space: pre-wrap; text-align: left; max-height: 140px; overflow: auto;
+  }
   .spinner {
     width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border);
     border-top-color: var(--accent); display: inline-block; animation: spin .8s linear infinite;
     vertical-align: -3px; margin-right: 6px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-
-  a.adv-link { position: fixed; bottom: 14px; right: 16px; font-size: 12px; color: var(--ink-muted); text-decoration: none; }
-  a.adv-link:hover { color: var(--ink); }
 </style>
 <script type="importmap">
 {
@@ -215,8 +225,6 @@
     </div>
   </section>
 </main>
-
-<a class="adv-link" href="/dashboard">고급 모드(개발용) →</a>
 
 <script type="module">
 import * as THREE from "three";
@@ -416,7 +424,7 @@ function resizeCutViewer() {
 function initCutViewer() {
   const el = $("cutViewport");
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x05100c);
+  scene.background = new THREE.Color(0x0f1b30);
 
   camera = new THREE.PerspectiveCamera(45, 1, 0.001, 100);
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -428,7 +436,7 @@ function initCutViewer() {
   const dl = new THREE.DirectionalLight(0xffffff, 1.0);
   dl.position.set(1, 2, 1);
   scene.add(dl);
-  const dl2 = new THREE.DirectionalLight(0x88ccbb, 0.4);
+  const dl2 = new THREE.DirectionalLight(0x6699ff, 0.4);
   dl2.position.set(-1, -1, -1);
   scene.add(dl2);
 
@@ -437,13 +445,13 @@ function initCutViewer() {
 
   const planeGeo = new THREE.PlaneGeometry(1, 1);
   const planeMat = new THREE.MeshBasicMaterial({
-    color: 0x35b58c, transparent: true, opacity: 0.28, side: THREE.DoubleSide, depthWrite: false,
+    color: 0x4d8dff, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false,
   });
   cutPlaneMesh = new THREE.Mesh(planeGeo, planeMat);
   cutPlaneMesh.rotation.x = Math.PI / 2; // XZ 평면(법선 = Y)
   scene.add(cutPlaneMesh);
 
-  floorGrid = new THREE.GridHelper(1, 20, 0x2b302e, 0x1c2320);
+  floorGrid = new THREE.GridHelper(1, 20, 0x334155, 0x1e293b);
   scene.add(floorGrid);
 
   window.addEventListener("resize", resizeCutViewer);
