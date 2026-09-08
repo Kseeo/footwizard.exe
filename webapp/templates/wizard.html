@@ -106,6 +106,7 @@
   }
 
   .actions { display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap; justify-content: center; }
+  .actions[hidden] { display: none; }
   button.primary {
     background: var(--accent); color: #fff; border: none; padding: 12px 26px;
     border-radius: 9px; font-size: 15px; font-weight: 700; cursor: pointer; transition: background .15s;
@@ -224,7 +225,11 @@
     <div class="status" id="status4"></div>
     <div class="actions">
       <a class="dl-link" id="dlLink" download>GLB 다운로드</a>
+      <button class="secondary" id="btnSendGnn">GNN으로 하중 변형 예측</button>
       <button class="secondary" id="btnRestart">새로 만들기</button>
+    </div>
+    <div class="actions" id="gnnActions" hidden>
+      <a class="dl-link" id="gnnDlLink" download>예측 결과 다운로드</a>
     </div>
   </section>
 </main>
@@ -552,10 +557,27 @@ $("btnSave").onclick = async () => {
   setBusy(btn, false, "이 위치로 저장");
 };
 
+$("btnSendGnn").onclick = async () => {
+  const btn = $("btnSendGnn");
+  setBusy(btn, true);
+  setStatus("status4", "GNN 서버로 보내 하중 변형을 예측하는 중... (몇 분 걸릴 수 있습니다)");
+  try {
+    const data = await postJSON(`/api/send_to_gnn/${jobId}`, {});
+    $("finalViewer").src = `/jobs/${jobId}/${data.file}`;
+    $("gnnDlLink").href = `/jobs/${jobId}/${data.file}?download=1`;
+    $("gnnActions").hidden = false;
+    setStatus("status4", `GNN 예측 완료 -- 정점 ${data.n_vertices.toLocaleString()}개, 면 ${data.n_faces.toLocaleString()}개`);
+  } catch (err) {
+    setStatus("status4", (err.error || "GNN 예측 실패"), true);
+  }
+  setBusy(btn, false, "GNN으로 하중 변형 예측");
+};
+
 $("btnRestart").onclick = () => {
   jobId = null; candidates = []; candIndex = 0; visibleCount = CAND_BATCH; croppedFile = null; pendingFile = null;
   fileInput.value = ""; $("fname").textContent = ""; $("btnToStep2").disabled = true;
   setStatus("status1", ""); setStatus("status2", ""); setStatus("status3", ""); setStatus("status4", "");
+  $("gnnActions").hidden = true;
   setStep(1);
 };
 

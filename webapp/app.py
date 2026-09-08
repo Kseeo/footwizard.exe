@@ -9,6 +9,8 @@
          발목 절단 높이는 사람이 3D 뷰어를 보고 직접 고른다(자동 탐지 없음).
   4단계(완료, "저장" 버튼): api_cut_and_save() -- 고른 높이에서 자르고
          스케일 맞춤 + 정리/스무딩까지 마무리한다.
+  (선택, "GNN으로 보내기" 버튼): api_send_to_gnn() -- 완성된 메쉬를 GNN
+         추론 서버(다른 PC, `GNN_API_URL`)로 보내 하중 변형 예측 결과를 받는다.
 
 2단계는 3D 렌더링(pyglet)이 들어가서 별도 프로세스(`stage1_orientation_worker.py`)로
 매번 새로 띄운다. 나머지 단계는 렌더링이 없어 이 서버 프로세스에서 바로 처리한다.
@@ -28,8 +30,12 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+import requests
 import trimesh
 from flask import Flask, jsonify, render_template, request, send_from_directory
+
+#: 하중 변형 GNN 추론을 맡는 별도 PC의 API 주소.
+GNN_API_URL = "http://203.255.175.206:5051/predict"
 
 # ---------------------------------------------------------------------------
 # 경로 설정 -- 필요하면 여기만 고치면 됨.
@@ -237,6 +243,48 @@ def api_cut_and_save(job_id):
             n_faces=len(result.mesh.faces),
             scale_factor=result.scale_factor,
         )
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify(error=str(e)), 500
+
+
+@app.route("/api/send_to_gnn/<job_id>", methods=["POST"])
+def api_send_to_gnn(job_id):
+    """완성된 메쉬(4단계 결과)를 GNN 추론 서버로 보내 하중 변형 예측 결과를 받는다.
+
+    GNN 서버는 GLB 파일 하나를 받아, 성공하면 예측된 GLB를 그대로,
+    실패하면 에러 메시지를 담은 JSON을 돌려준다(`GNN_API_URL` 참고).
+    """
+    try:
+        d = job_dir(job_id)
+        src_path = d / "4_final.glb"
+        if not src_path.exists():
+            return jsonify(error="4단계(완료) 결과가 없습니다"), 400
+
+        with open(src_path, "rb") as f:
+            resp = requests.post(
+                GNN_API_URL,
+                files={"file": (src_path.name, f, "model/gltf-binary")},
+                timeout=300,
+            )
+
+        content_type = resp.headers.get("Content-Type", "")
+        if resp.status_code != 200 or "json" in content_type:
+            try:
+                message = resp.json().get("error", resp.text)
+            except ValueError:
+                message = resp.text
+            return jsonify(error=f"GNN 서버 오류: {message}"), 502
+
+        out_path = d / "5_gnn.glb"
+        out_path.write_bytes(resp.content)
+        mesh = trimesh.load(out_path, force="mesh", process=False)
+
+        return jsonify(file=out_path.name, n_vertices=len(mesh.vertices), n_faces=len(mesh.faces))
+    except requests.exceptions.ConnectionError:
+        return jsonify(error=f"GNN 서버({GNN_API_URL})에 연결할 수 없습니다 -- 서버가 켜져 있는지 확인하세요"), 502
+    except requests.exceptions.Timeout:
+        return jsonify(error="GNN 서버 응답 시간 초과(5분)"), 504
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         return jsonify(error=str(e)), 500
