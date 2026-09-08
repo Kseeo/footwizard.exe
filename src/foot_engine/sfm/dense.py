@@ -14,10 +14,13 @@ import numpy as np
 import trimesh
 
 from .geometry import pca_axes
-from .mesh_postprocess import keep_largest_component
+from .mesh_postprocess import finish_smooth_mesh, keep_largest_component
 
 #: 자기신고 발길이 없을 때 쓰는 임시 스케일 기준값(mm). 절대 축척 아님.
 DEFAULT_REFERENCE_LENGTH_MM = 250.0
+
+#: `cut_and_finish_mesh()`가 최종 저장 전 맞추는 목표 정점 수.
+DEFAULT_TARGET_VERTICES = 18_000
 
 
 def _fibonacci_sphere(n: int) -> np.ndarray:
@@ -235,6 +238,48 @@ def to_z_up(mesh: trimesh.Trimesh) -> trimesh.Trimesh:
     x, y, z = mesh.vertices[:, 0], mesh.vertices[:, 1], mesh.vertices[:, 2]
     rotated.vertices = np.stack([x, -z, y], axis=1)
     return rotated
+
+
+def decimate_mesh(
+    mesh: trimesh.Trimesh,
+    *,
+    target_vertices: int,
+    smooth_after: bool = True,
+    smooth_lamb: float = 0.5,
+    smooth_iterations: int = 5,
+    max_tuning_iterations: int = 3,
+) -> trimesh.Trimesh:
+    """쿼드릭 에지 축약으로 정점 수를 target_vertices 근방까지 줄인다.
+
+    Args:
+        target_vertices: 목표 정점 수. 이미 이보다 적으면 그대로 반환.
+        smooth_after: 축약 직후 라플라시안 마감 스무딩을 할지(축약이 남기는
+            뾰족한 아티팩트 정리용).
+        smooth_lamb, smooth_iterations: `finish_smooth_mesh()`로 전달.
+        max_tuning_iterations: 목표 정점 수에 맞을 때까지 재시도할 최대 횟수.
+    """
+    n_before = len(mesh.vertices)
+    if n_before <= target_vertices:
+        print(f"[decimate] 이미 목표({target_vertices:,}) 이하(정점 {n_before:,}) -- 건너뜀")
+        return mesh
+
+    target_faces = target_vertices * 2
+    simplified = mesh
+    for _ in range(max_tuning_iterations):
+        simplified = mesh.simplify_quadric_decimation(face_count=target_faces)
+        n_after = len(simplified.vertices)
+        if n_after == 0:
+            break
+        ratio = target_vertices / n_after
+        if 0.9 <= ratio <= 1.1:
+            break
+        target_faces = max(int(target_faces * ratio), 4)
+
+    print(f"[decimate] 쿼드릭 단순화: 정점 {n_before:,} -> {len(simplified.vertices):,} "
+          f"(목표 {target_vertices:,})")
+    if smooth_after:
+        simplified = finish_smooth_mesh(simplified, lamb=smooth_lamb, iterations=smooth_iterations)
+    return simplified
 
 
 def find_floor_contact_mask(

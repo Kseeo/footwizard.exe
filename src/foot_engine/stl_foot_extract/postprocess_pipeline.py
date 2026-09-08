@@ -8,6 +8,7 @@
     2. `align_for_manual_cut()` -- 고른 방향으로 정렬만(자르기 전)
     3. `cut_and_finish_mesh()` -- 사람이 고른 높이에서 절단 + `finishing.
        postprocess_mesh()`(배경 파편 제거+스무딩+구멍 메움) + 스케일 +
+       `sfm.dense.decimate_mesh()`(정점 수 맞춤) +
        `sfm.dense.find_floor_contact_mask()`(접지 노드)
 """
 
@@ -21,8 +22,10 @@ import trimesh
 
 from foot_engine.sfm.dense import (
     DEFAULT_REFERENCE_LENGTH_MM,
+    DEFAULT_TARGET_VERTICES,
     align_sole_down,
     cut_at_height,
+    decimate_mesh,
     find_floor_contact_mask,
     keep_largest_component,
     prune_far_fragments,
@@ -118,9 +121,12 @@ def cut_and_finish_mesh(
     fill_round_holes_enabled: bool = True,
     fill_round_holes_min_circularity: float = 0.5,
     floor_contact_tolerance_mm: float | None = 2.0,
+    target_vertices: int | None = DEFAULT_TARGET_VERTICES,
+    decimate_smooth_after: bool = True,
 ) -> FootPipelineResult:
     """마법사 4단계("저장" 버튼): `align_for_manual_cut()`이 만든 메쉬를
-    사람이 고른 `cut_y` 높이에서 자르고 스케일+정리+스무딩까지 마무리한다.
+    사람이 고른 `cut_y` 높이에서 자르고 스케일+정리+스무딩+해상도 맞춤까지
+    마무리한다.
 
     스무딩은 절단 전에 하고(먼저 표면을 매끈하게 만들면 절단면 자체가
     깨끗하게 나옴), 스케일은 절단 후에 계산한다(절단 전 길이엔 다리까지
@@ -135,6 +141,9 @@ def cut_and_finish_mesh(
             파편을 잘라낼지.
         floor_contact_tolerance_mm: 지정하면 바닥에서 이 거리(mm) 이내
             정점을 표시하는 마스크를 같이 계산한다.
+        target_vertices: 최종 정점 수를 이 값 근방으로 맞춘다(`decimate_mesh()`).
+            None이면 축약하지 않는다.
+        decimate_smooth_after: 축약 직후 마감 스무딩을 할지.
     """
     mesh = aligned_mesh
     if postprocess:
@@ -176,6 +185,9 @@ def cut_and_finish_mesh(
                 f"[cut] 목(neck) 감지로 파편 조각 분리: {len(components)}개 중 "
                 f"발 모양 점수로 채택(정점 {n_before:,} -> {len(mesh.vertices):,})"
             )
+
+    if target_vertices is not None:
+        mesh = decimate_mesh(mesh, target_vertices=target_vertices, smooth_after=decimate_smooth_after)
 
     mesh = rest_on_floor(mesh)
 

@@ -2,6 +2,7 @@
 
     dense.align_sole_down() — PCA 축 정렬 + 발바닥 방향 탐지
     dense.cut_at_height() — 사람이 고른 높이에서 수동 절단
+    dense.decimate_mesh() — 정점 수를 목표치까지 줄임
     dense.rest_on_floor() / to_z_up() — 좌표계 정리
     masking.load_skin_segmenter() / skin_only_mask() — 피부 분할 (texture_crop.py가 씀)
 
@@ -12,9 +13,11 @@ from __future__ import annotations
 
 from .dense import (
     DEFAULT_REFERENCE_LENGTH_MM,
+    DEFAULT_TARGET_VERTICES,
     SoleDirectionCandidate,
     align_sole_down,
     cut_at_height,
+    decimate_mesh,
     find_floor_contact_mask,
     find_sole_direction_candidates,
     prune_far_fragments,
@@ -38,9 +41,11 @@ __all__ = [
     "finish_smooth_mesh",
     # dense (메쉬 정렬/절단)
     "DEFAULT_REFERENCE_LENGTH_MM",
+    "DEFAULT_TARGET_VERTICES",
     "SoleDirectionCandidate",
     "align_sole_down",
     "cut_at_height",
+    "decimate_mesh",
     "find_floor_contact_mask",
     "find_sole_direction_candidates",
     "prune_far_fragments",

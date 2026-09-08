@@ -15,7 +15,7 @@
     --accent-hover: #1d4ed8;
     --accent-dim: #e3ecfd;
     --danger: #dc2626;
-    --stage-bg: #0f1b30;
+    --stage-bg: #e6ebf2;
     --shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 8px 24px rgba(15, 23, 42, .06);
   }
   * { box-sizing: border-box; }
@@ -100,7 +100,10 @@
   .tilt-adv label { font-size: 12px; color: var(--ink-muted); display: block; margin-top: 8px; }
 
   /* 4: 완료 */
-  model-viewer { width: 100%; height: 340px; background: var(--stage-bg); border-radius: 12px; }
+  model-viewer {
+    width: 100%; height: 340px; background: var(--stage-bg); border-radius: 12px;
+    border: 1px solid var(--border);
+  }
 
   .actions { display: flex; gap: 10px; margin-top: 4px; flex-wrap: wrap; justify-content: center; }
   button.primary {
@@ -424,7 +427,7 @@ function resizeCutViewer() {
 function initCutViewer() {
   const el = $("cutViewport");
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0f1b30);
+  scene.background = new THREE.Color(0xe6ebf2);
 
   camera = new THREE.PerspectiveCamera(45, 1, 0.001, 100);
   renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -432,11 +435,11 @@ function initCutViewer() {
   el.innerHTML = "";
   el.appendChild(renderer.domElement);
 
-  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-  const dl = new THREE.DirectionalLight(0xffffff, 1.0);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+  const dl = new THREE.DirectionalLight(0xffffff, 0.9);
   dl.position.set(1, 2, 1);
   scene.add(dl);
-  const dl2 = new THREE.DirectionalLight(0x6699ff, 0.4);
+  const dl2 = new THREE.DirectionalLight(0x6699ff, 0.3);
   dl2.position.set(-1, -1, -1);
   scene.add(dl2);
 
@@ -445,13 +448,13 @@ function initCutViewer() {
 
   const planeGeo = new THREE.PlaneGeometry(1, 1);
   const planeMat = new THREE.MeshBasicMaterial({
-    color: 0x4d8dff, transparent: true, opacity: 0.3, side: THREE.DoubleSide, depthWrite: false,
+    color: 0x2563eb, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false,
   });
   cutPlaneMesh = new THREE.Mesh(planeGeo, planeMat);
   cutPlaneMesh.rotation.x = Math.PI / 2; // XZ 평면(법선 = Y)
   scene.add(cutPlaneMesh);
 
-  floorGrid = new THREE.GridHelper(1, 20, 0x334155, 0x1e293b);
+  floorGrid = new THREE.GridHelper(1, 20, 0x94a3b8, 0xcbd5e1);
   scene.add(floorGrid);
 
   window.addEventListener("resize", resizeCutViewer);
