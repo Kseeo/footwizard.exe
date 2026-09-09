@@ -1,0 +1,15 @@
+[Unit]
+Description=Virtual X display for footwizard headless rendering (trimesh/pyglet)
+
+[Service]
+# <XVFB_BIN>: 실제 GLX 지원 Xvfb 바이너리 경로. deploy/README.md의 "Xvfb 준비"
+# 참고 -- 배포 환경에 root 권한이 없으면 conda-forge의 xvfb 패키지들은 GLX가
+# 안 들어있거나(xorg-xvfb-server) 오래된 libcrypto.so.10을 요구해서(-cos7
+# 계열) 못 쓴다. `apt-get download xvfb`로 받은 .deb를 dpkg-deb -x로 풀어
+# 쓰는 게 가장 간단했다(설치가 아니라 다운로드+추출이라 root 불필요).
+ExecStart=<XVFB_BIN> :99 -screen 0 1024x768x24 -nolisten tcp
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
