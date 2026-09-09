@@ -1,23 +1,7 @@
-"""발 추출 마법사의 Flask 서버 -- 웹 UI(wizard.html)가 호출하는 API 라우트 전부.
+"""발 추출 마법사의 Flask 서버 -- wizard.html이 호출하는 API 라우트 전부.
 
-`launcher.py`가 이 앱을 띄운다. 마법사는 화면 4단계로 진행된다:
-
-  1단계(업로드): api_upload()
-  2단계(방향 선택): api_stage1_orientation() -- 발 부위를 크롭하고
-         (`crop_foot_mesh()`) 발바닥 방향 후보 몇 개를 계산해 사람이 고르게 한다.
-  3단계(절단 위치): api_align_for_cut() -- 고른 방향으로 메쉬를 정렬한다.
-         발목 절단 높이는 사람이 3D 뷰어를 보고 직접 고른다(자동 탐지 없음).
-  4단계(완료, "저장" 버튼): api_cut_and_save() -- 고른 높이에서 자르고
-         스케일 맞춤 + 정리/스무딩까지 마무리한다.
-  (선택, "GNN으로 보내기" 버튼): api_send_to_gnn() -- 완성된 메쉬를 GNN
-         추론 서버(다른 PC, `GNN_API_URL`)로 보내 하중 변형 예측 결과를 받는다.
-
-2단계는 3D 렌더링(pyglet)이 들어가서 별도 프로세스(`stage1_orientation_worker.py`)로
-매번 새로 띄운다. 나머지 단계는 렌더링이 없어 이 서버 프로세스에서 바로 처리한다.
-
-직접 실행:
-    C:/Users/cani0/foot_deform_engine/.venv/Scripts/python.exe webapp/app.py
-    -> http://127.0.0.1:5050 접속
+"전처리" 탭(업로드 -> 방향 선택 -> 절단 위치 -> 완료)과 "GNN 구동" 탭(체크포인트
+선택 후 하중 변형 예측)으로 구성. GNN 추론은 gnn_predict.py 참고.
 """
 
 from __future__ import annotations
@@ -27,15 +11,14 @@ import subprocess
 import sys
 import traceback
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-import requests
 import trimesh
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
-#: 하중 변형 GNN 추론을 맡는 별도 PC의 API 주소.
-GNN_API_URL = "http://203.255.175.206:5051/predict"
+import gnn_predict
 
 # ---------------------------------------------------------------------------
 # 경로 설정 -- 필요하면 여기만 고치면 됨.
@@ -45,8 +28,7 @@ FOOT_ENGINE_SRC = REPO_ROOT / "src"
 if str(FOOT_ENGINE_SRC) not in sys.path:
     sys.path.insert(0, str(FOOT_ENGINE_SRC))
 
-# cp949 등 비-UTF8 콘솔에서 foot_engine 쪽 한글/em-dash 출력이 깨지거나
-# UnicodeEncodeError로 죽는 문제 방지 (launcher.py/stage1_orientation_worker.py도 같은 조치).
+# 비-UTF8 콘솔(cp949 등)에서 한글 출력이 깨지지 않도록.
 for _stream_name in ("stdout", "stderr"):
     _stream = getattr(sys, _stream_name, None)
     if _stream is not None and hasattr(_stream, "reconfigure"):
@@ -55,14 +37,9 @@ for _stream_name in ("stdout", "stderr"):
         except Exception:
             pass
 
-# 얼린(frozen) exe엔 별도 python.exe가 없어 "python.exe stage1_orientation_worker.py"
-# 식 호출이 안 된다 -- 대신 이 exe 자체를 특수 플래그로 재귀 호출해서 워커
-# 역할을 하게 한다(launcher.py의 워커 분기 참고). 개발 모드(python app.py)
-# 에서는 그대로 스크립트를 호출한다.
-#
-# 쓰기 가능해야 하는 경로(_APP_DIR, exe 옆의 jobs/ 폴더)와 읽기 전용 번들
-# 자산 경로(_BUNDLE_DIR, PyInstaller가 --add-data로 넣은 templates/,
-# data/models/)는 얼린 상태에서 서로 다른 위치라 구분해서 써야 한다.
+# exe(frozen) 상태에서는 워커를 별도 python.exe로 못 띄워 exe 자신을 재귀
+# 호출한다(launcher.py 참고). 쓰기 가능한 _APP_DIR(jobs/)과 읽기 전용 번들
+# 자산 경로 _BUNDLE_DIR(templates/)도 exe에서는 서로 다른 위치라 구분한다.
 FROZEN = getattr(sys, "frozen", False)
 _APP_DIR = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent
 _BUNDLE_DIR = Path(sys._MEIPASS) if FROZEN else Path(__file__).resolve().parent  # type: ignore[attr-defined]
@@ -83,8 +60,7 @@ def _stage1_orientation_worker_cmd() -> list[str]:
         return [sys.executable, "--stage1-orientation-worker"]
     return [sys.executable, str(STAGE1_ORIENTATION_WORKER)]
 
-# 얼린(frozen) exe에서는 Flask 기본 template_folder 추정(모듈 위치 기준)이
-# PyInstaller 번들 임시 폴더 구조를 못 따라간다 -- exe 옆 templates/를 명시.
+# exe에서는 Flask의 기본 template_folder 추정이 안 맞아 명시적으로 지정.
 app = Flask(__name__, template_folder=str(_BUNDLE_DIR / "templates")) if FROZEN else Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512MB
 
@@ -94,6 +70,31 @@ def job_dir(job_id: str) -> Path:
     if not d.is_dir():
         raise FileNotFoundError(f"알 수 없는 job_id: {job_id}")
     return d
+
+
+# ---------------------------------------------------------------------------
+# 작업 이력 -- job 폴더마다 진행 상태를 meta.json에 남겨 서버 재시작 후에도 유지.
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def read_meta(d: Path) -> dict:
+    p = d / "meta.json"
+    if not p.exists():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def write_meta(d: Path, **updates) -> dict:
+    meta = read_meta(d)
+    meta.update(updates)
+    (d / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return meta
 
 
 # ---------------------------------------------------------------------------
@@ -118,17 +119,13 @@ def api_upload():
     suffix = Path(f.filename).suffix or ".glb"
     input_path = d / f"0_input{suffix}"
     f.save(input_path)
+    write_meta(d, original_filename=f.filename, created_at=_now_iso(), stage="uploaded")
     return jsonify(job_id=job_id, filename=input_path.name)
 
 
 @app.route("/api/stage1_orientation/<job_id>", methods=["POST"])
 def api_stage1_orientation(job_id):
-    """발을 크롭하고, 발바닥 방향 후보 여러 개를 미리보기 이미지로 만들어 반환한다.
-
-    자동으로 1등 방향만 고르면 가끔 틀릴 수 있어, 사람이 후보 중 눈으로
-    보고 고르게 한다. 크롭 결과는 파일로 캐싱해서 -- `api_align_for_cut()`에
-    `cropped_file`로 넘기면 재크롭 없이 정렬만 다시 한다.
-    """
+    """발을 크롭하고 발바닥 방향 후보들을 미리보기 이미지로 반환 -- 사람이 눈으로 고른다."""
     try:
         d = job_dir(job_id)
         inputs = list(d.glob("0_input.*"))
@@ -159,9 +156,7 @@ def api_stage1_orientation(job_id):
 
 @app.route("/api/align_for_cut/<job_id>", methods=["POST"])
 def api_align_for_cut(job_id):
-    """마법사 3단계: 고른 방향으로 정렬만 한다(자르기/스케일 전) -- 발목 절단
-    슬라이더가 3D로 보여줄 대상. pyglet 렌더링이 없는 순수 CPU 연산이라
-    subprocess 격리 없이 바로 처리(크롭 단계와 다름)."""
+    """3단계: 고른 방향으로 정렬만 한다(자르기/스케일 전) -- 절단 슬라이더가 보여줄 대상."""
     try:
         d = job_dir(job_id)
         args = request.get_json(silent=True) or {}
@@ -173,14 +168,12 @@ def api_align_for_cut(job_id):
         mesh = trimesh.load(d / cropped_file, force="mesh", process=False)
         aligned = align_for_manual_cut(mesh, down_direction=np.array(down_direction, dtype=np.float64))
 
-        # 실제 절단(cut_and_save)은 이 고해상도 원본으로 한다.
+        # 실제 절단은 이 고해상도 원본으로 한다.
         out_path = d / "3_aligned_for_cut.glb"
         aligned.export(out_path)
 
-        # 3단계 뷰어는 절단 위치만 보면 되니 사진 텍스처는 필요 없다 -- 정점
-        # 수를 줄이고 단색으로 바꾼 가벼운 미리보기를 따로 만들어 로딩을
-        # 빠르게 한다. 경계(절단면 테두리)는 정점을 줄이기 전에 먼저 다듬어야
-        # 톱니 모양이 덜 도드라진다.
+        # 3단계 뷰어용 미리보기는 텍스처 없이 가볍게(정점 감소 전에 절단면
+        # 테두리부터 다듬어야 톱니 모양이 덜 도드라진다).
         preview_path = d / "3_preview.glb"
         preview_source = smooth_boundary_loops(aligned)
         preview_faces = min(len(preview_source.faces), 6000)
@@ -206,8 +199,7 @@ def api_align_for_cut(job_id):
 
 @app.route("/api/cut_and_save/<job_id>", methods=["POST"])
 def api_cut_and_save(job_id):
-    """마법사 4단계("저장" 버튼): 사람이 고른 Y 높이에서 잘라 스케일+정리+
-    스무딩까지 한 번에 마친다(pyglet 없음, subprocess 격리 불필요)."""
+    """4단계("저장"): 고른 Y 높이에서 잘라 스케일+정리+스무딩까지 한 번에 마친다."""
     try:
         d = job_dir(job_id)
         args = request.get_json(silent=True) or {}
@@ -219,11 +211,8 @@ def api_cut_and_save(job_id):
 
         aligned = trimesh.load(d / "3_aligned_for_cut.glb", force="mesh", process=False)
         if quat:
-            # 3단계 뷰어의 미세조정 슬라이더가 만든 회전을 각도로 재계산하지 않고
-            # three.js가 실제로 쓰는 쿼터니언을 그대로 받아 적용한다 -- Euler 축
-            # 순서 컨벤션(XYZ가 Rx·Ry·Rz인지 반대인지)을 직접 맞추려다 뷰어에서
-            # 본 것과 저장 결과가 미세하게 어긋나는 위험을 아예 없앤다. trimesh는
-            # [w,x,y,z] 순서를 받으므로 재배열.
+            # three.js가 쓴 쿼터니언을 그대로 적용(각도 재계산 없이 뷰어와 저장
+            # 결과가 어긋나지 않게) -- trimesh는 [w,x,y,z] 순서라 재배열.
             x, y, z, w = quat
             rot = trimesh.transformations.quaternion_matrix([w, x, y, z])
             aligned.apply_transform(rot)
@@ -237,6 +226,13 @@ def api_cut_and_save(job_id):
         if result.floor_contact_mask is not None:
             np.save(d / "4_final_floor_contact.npy", result.floor_contact_mask)
 
+        # stage="done"이 되면 "작업 이력" 탭(GET /api/jobs)에 나타난다.
+        write_meta(
+            d, stage="done", final_file=out_path.name,
+            n_vertices=len(result.mesh.vertices), n_faces=len(result.mesh.faces),
+            scale_factor=result.scale_factor, finished_at=_now_iso(),
+        )
+
         return jsonify(
             file=out_path.name,
             n_vertices=len(result.mesh.vertices),
@@ -248,54 +244,95 @@ def api_cut_and_save(job_id):
         return jsonify(error=str(e)), 500
 
 
-@app.route("/api/send_to_gnn/<job_id>", methods=["POST"])
-def api_send_to_gnn(job_id):
-    """완성된 메쉬(4단계 결과)를 GNN 추론 서버로 보내 하중 변형 예측 결과를 받는다.
-
-    GNN 서버는 GLB 파일 하나를 받아, 성공하면 예측된 GLB를 그대로,
-    실패하면 에러 메시지를 담은 JSON을 돌려준다(`GNN_API_URL` 참고).
-    """
+@app.route("/api/gnn_checkpoints", methods=["GET"])
+def api_gnn_checkpoints():
+    """GNN 패널의 모델(체크포인트) 선택 드롭다운용 목록."""
     try:
-        d = job_dir(job_id)
-        src_path = d / "4_final.glb"
-        if not src_path.exists():
-            return jsonify(error="4단계(완료) 결과가 없습니다"), 400
-
-        with open(src_path, "rb") as f:
-            resp = requests.post(
-                GNN_API_URL,
-                files={"file": (src_path.name, f, "model/gltf-binary")},
-                timeout=300,
-            )
-
-        content_type = resp.headers.get("Content-Type", "")
-        if resp.status_code != 200 or "json" in content_type:
-            try:
-                message = resp.json().get("error", resp.text)
-            except ValueError:
-                message = resp.text
-            return jsonify(error=f"GNN 서버 오류: {message}"), 502
-
-        out_path = d / "5_gnn.glb"
-        out_path.write_bytes(resp.content)
-        mesh = trimesh.load(out_path, force="mesh", process=False)
-
-        return jsonify(file=out_path.name, n_vertices=len(mesh.vertices), n_faces=len(mesh.faces))
-    except requests.exceptions.ConnectionError:
-        return jsonify(error=f"GNN 서버({GNN_API_URL})에 연결할 수 없습니다 -- 서버가 켜져 있는지 확인하세요"), 502
-    except requests.exceptions.Timeout:
-        return jsonify(error="GNN 서버 응답 시간 초과(5분)"), 504
+        return jsonify(checkpoints=gnn_predict.list_checkpoints())
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         return jsonify(error=str(e)), 500
 
 
+@app.route("/api/send_to_gnn/<job_id>", methods=["POST"])
+def api_send_to_gnn(job_id):
+    """job_id 폴더 안의 메쉬(source_file, 기본 "4_final.glb")를 GNN으로 예측한다."""
+    try:
+        d = job_dir(job_id)
+        args = request.get_json(silent=True) or {}
+        source_file = Path(args.get("source_file") or "4_final.glb").name  # .name: job 폴더 밖을 못 가리키게
+        src_path = d / source_file
+        if not src_path.exists():
+            return jsonify(error=f"입력 메쉬가 없습니다: {source_file}"), 400
+
+        checkpoint = args.get("checkpoint")
+        if not checkpoint:
+            return jsonify(error="checkpoint가 필요합니다"), 400
+        smooth = bool(args.get("smooth", True))
+        lamb = args.get("lamb")
+        iterations = args.get("iterations")
+        floor_percentile = args.get("floor_percentile")
+
+        result = gnn_predict.predict(
+            src_path, d, checkpoint=checkpoint, smooth=smooth,
+            lamb=float(lamb) if lamb is not None else None,
+            iterations=int(iterations) if iterations is not None else None,
+            floor_percentile=float(floor_percentile) if floor_percentile is not None else None,
+        )
+
+        write_meta(
+            d, gnn_done=True, gnn_checkpoint=result["checkpoint"],
+            gnn_predicted_file=result["predicted_file"],
+            gnn_predicted_n_vertices=result["predicted_n_vertices"],
+            gnn_predicted_n_faces=result["predicted_n_faces"],
+            gnn_smoothed_file=result["smoothed_file"],
+            gnn_smoothed_n_vertices=result["smoothed_n_vertices"],
+            gnn_smoothed_n_faces=result["smoothed_n_faces"],
+            gnn_at=_now_iso(),
+        )
+
+        return jsonify(**result)
+    except gnn_predict.GnnPredictError as e:
+        return jsonify(error=str(e), log=e.log), 502
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return jsonify(error=str(e)), 500
+
+
+@app.route("/api/jobs", methods=["GET"])
+def api_jobs():
+    """완료된(stage="done") 전처리 작업 목록 -- "GNN 구동" 탭 드롭다운용. 최신순."""
+    jobs = []
+    for d in JOBS_DIR.iterdir():
+        if not d.is_dir():
+            continue
+        meta = read_meta(d)
+        if meta.get("stage") != "done":
+            continue
+        jobs.append({
+            "job_id": d.name,
+            "filename": meta.get("original_filename"),
+            "created_at": meta.get("created_at"),
+            "finished_at": meta.get("finished_at"),
+            "final_file": meta.get("final_file"),
+            "n_vertices": meta.get("n_vertices"),
+            "n_faces": meta.get("n_faces"),
+            "gnn_done": bool(meta.get("gnn_done")),
+            "gnn_checkpoint": meta.get("gnn_checkpoint"),
+            "gnn_predicted_file": meta.get("gnn_predicted_file"),
+            "gnn_predicted_n_vertices": meta.get("gnn_predicted_n_vertices"),
+            "gnn_predicted_n_faces": meta.get("gnn_predicted_n_faces"),
+            "gnn_smoothed_file": meta.get("gnn_smoothed_file"),
+            "gnn_smoothed_n_vertices": meta.get("gnn_smoothed_n_vertices"),
+            "gnn_smoothed_n_faces": meta.get("gnn_smoothed_n_faces"),
+        })
+    jobs.sort(key=lambda j: j.get("finished_at") or "", reverse=True)
+    return jsonify(jobs=jobs)
+
+
 @app.route("/jobs/<job_id>/<path:filename>")
 def serve_job_file(job_id, filename):
-    # model-viewer 미리보기는 inline(기본값)으로 그냥 로드해야 하지만, 다운로드
-    # 링크는 <a download>만으로는 브라우저마다 강제 저장이 안 먹는 경우가 있어
-    # (Content-Disposition: inline이 우선되는 사례 확인) ?download=1이면
-    # attachment로 명시해 확실히 저장 다이얼로그가 뜨게 한다.
+    # ?download=1이면 attachment로 강제해 저장 다이얼로그가 뜨게 한다.
     as_attachment = request.args.get("download") == "1"
     return send_from_directory(job_dir(job_id), filename, as_attachment=as_attachment)
 

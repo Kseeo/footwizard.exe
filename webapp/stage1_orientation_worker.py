@@ -1,11 +1,7 @@
-"""마법사 2단계 워커: 발을 크롭하고 발바닥 방향 후보들을 미리보기 이미지로
-저장한다.
+"""마법사 2단계 워커 -- 발을 크롭하고 방향 후보들을 미리보기 이미지로 저장한다.
 
-`webapp/app.py`가 매 요청마다 이 스크립트를 새 프로세스로 띄운다(발 크롭에
-쓰는 3D 렌더링을 서버 본체와 분리하기 위해). 크롭 결과는 파일로 저장해두고,
-사용자가 방향을 고르면(3단계) 그 파일을 그대로 이어 써서 다시 크롭하지 않는다.
-
-결과는 stdout에 JSON 한 줄로만 출력한다(그 외 로그는 stderr로).
+app.py가 3D 렌더링을 서버 본체와 분리하려고 매 요청마다 별도 프로세스로 띄운다.
+결과는 stdout에 JSON 한 줄로 출력(그 외 로그는 stderr).
 """
 from __future__ import annotations
 
@@ -43,9 +39,7 @@ def main() -> int:
     p.add_argument("--input", required=True)
     p.add_argument("--output_cropped", required=True)
     p.add_argument("--job_dir", required=True)
-    # 10개를 한 번에 뽑아둔다(웹앱은 처음엔 5개만 보여주고 "더 보기"로 재크롭
-    # 없이 나머지를 마저 보여줌) -- 크롭(다중뷰 렌더링, ~20초)은 한 번만 하고
-    # 후보 계산+썸네일 렌더만 늘어나는 거라 비용이 적다.
+    # 웹앱이 5개씩 보여주며 "더 보기"로 재크롭 없이 넘기므로 10개를 미리 뽑아둔다.
     p.add_argument("--k", type=int, default=10)
     p.add_argument("--result_json", required=True)
     args = p.parse_args()
@@ -55,8 +49,7 @@ def main() -> int:
     cropped_mesh.export(out_cropped)
 
     job_dir = Path(args.job_dir)
-    # sole_direction_candidates_for_mesh()는 내부적으로 keep_largest_component()를
-    # 거친 뒤 후보를 뽑는다 -- 미리보기 정렬도 같은 전처리를 거쳐야 좌표계가 맞는다.
+    # 후보 계산과 같은 전처리(가장 큰 조각만 남기기)를 거쳐야 좌표계가 맞는다.
     largest, _, _ = keep_largest_component(cropped_mesh)
     candidates = sole_direction_candidates_for_mesh(cropped_mesh, k=args.k)
 

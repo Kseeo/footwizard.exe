@@ -26,6 +26,12 @@
 `requirements.txt`(직접 만들어야 함 -- 아래 "패키지 설치" 참고)를 미리
 설치해둔 파이썬 환경이어야 합니다.
 
+## (exe 대신) 리눅스 서버에 상시 웹 서비스로 실행
+
+각자 PC에 exe를 배포하는 대신 서버 한 대에 계속 띄워두고 사내망에서
+URL로 접속하고 싶다면 `deploy/README.md`를 참고하세요(`webapp/serve.py`
+진입점 + Xvfb + systemd --user 서비스 구성).
+
 ## 폴더 구조
 
 - `webapp/launcher.py` -- exe 진입점. Flask 서버를 띄우고 브라우저를 연다.
@@ -48,8 +54,13 @@
 
 ```powershell
 python -m venv .venv
-.venv\Scripts\pip install flask trimesh numpy opencv-python mediapipe scipy scikit-learn networkx pyglet pyinstaller
+.venv\Scripts\pip install flask trimesh numpy opencv-python mediapipe scipy scikit-learn networkx "pyglet<2" fast_simplification pyinstaller
 ```
+
+(`pyglet`은 2.x가 아니라 `<2`여야 합니다 -- trimesh의 오프스크린 렌더링이
+아직 pyglet 1.x API를 씁니다. `fast_simplification`은 3단계 미리보기
+데시메이션에 씁니다. 리눅스에서 exe 없이 상시 서비스로 띄우려면 여기에
+`waitress`도 추가 -- `deploy/README.md` 참고.)
 
 (정확한 버전 고정이 필요하면 실제 설치된 패키지로 `pip freeze >
 requirements.txt`를 만들어 커밋해둘 것을 권장합니다.)
